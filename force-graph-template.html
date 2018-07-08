@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<style>
+
+    path.link {
+        fill: none;
+        stroke: #666;
+        stroke-width: 1.5px;
+    }
+
+    circle {
+        fill: #ccc;
+        stroke: #fff;
+        stroke-width: 1.5px;
+    }
+
+    text {
+        fill: #000;
+        font: 10px sans-serif;
+        pointer-events: none;
+    }
+
+</style>
+<body>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.17/d3.js"></script>
+<script>
+
+    let links = '<insert_links_here>';
+    let nodes = {};
+
+    //     Compute the distinct nodes from the links.
+    links.forEach(function (link) {
+        link.source = nodes[link.source] ||
+            (nodes[link.source] = {name: link.source});
+        link.target = nodes[link.target] ||
+            (nodes[link.target] = {name: link.target});
+        link.value = +link.value;
+    });
+
+    function redraw() {
+
+        d3.select("svg").remove();
+        let svg = d3.select('body').append("svg");
+
+        // Calculate (by cascade) decent height and width numbers.
+        let width = 900;
+        let height = 600;
+        let r = 6;
+
+        if (typeof (window.innerWidth) == 'number') {
+            width = window.innerWidth;
+            height = window.innerHeight;
+        } else {
+            if (document.documentElement && (document.documentElement.clientWidth || document.documentElement.clientHeight)) {
+                width = document.documentElement.clientWidth;
+                height = document.documentElement.clientHeight;
+            } else {
+                if (document.body && (document.body.clientWidth || document.body.clientHeight)) {
+                    width = document.body.clientWidth;
+                    height = document.body.clientHeight;
+                }
+            }
+        }
+
+        svg
+            .attr("width", width)
+            .attr("height", height);
+
+        let force = d3.layout.force()
+            .gravity(0.18)
+            .nodes(d3.values(nodes))
+            .links(links)
+            .size([width, height])
+            .linkDistance(20)
+            .charge(-150)
+            .on("tick", tick)
+            .start();
+
+        // Build the arrow.
+        svg.append("svg:defs").selectAll("marker")
+            .data(["end"])
+            .enter().append("svg:marker")
+            .attr("id", String)
+            .attr("viewBox", "0 -5 10 10")
+            .attr("refX", 15)
+            .attr("markerWidth", 6)
+            .attr("markerHeight", 6)
+            .attr("orient", "auto")
+            .append("svg:path")
+            .attr("d", "M0,-5L10,0L0,5");
+
+        // Add the links and the arrows.
+        let path = svg.append("svg:g").selectAll("path")
+            .data(force.links())
+            .enter().append("svg:path")
+            .attr("class", "link")
+            .attr("marker-end", "url(#end)");
+
+        // Define the nodes.
+        let node = svg.selectAll(".node")
+            .data(force.nodes())
+            .enter().append("g")
+            .attr("class", "node")
+            .call(force.drag);
+
+        // Add the nodes.
+        node.append("circle")
+            .attr("r", 5);
+
+        // Add the text.
+        node.append("text")
+            .attr("x", 12)
+            .attr("dy", ".35em")
+            .text(function (d) {
+                return d.name;
+            });
+
+        // Add paths.
+        function tick() {
+            path.attr("d", function (d) {
+                return "M" +
+                    d.source.x + "," + d.source.y + "A" + "0, 0 0 0, 1 " +
+                    d.target.x + "," + d.target.y;
+            });
+            node
+                .attr("transform", function (d) {
+                    return "translate(" + Math.max(r, Math.min(width - r, d.x)) + "," + Math.max(r, Math.min(height - r, d.y)) + ")";
+                });
+
+        }
+    }
+
+    // Draw for the first time to initialize.
+    redraw();
+
+    // Redraw based on the new size whenever the browser window is resized.
+    window.addEventListener("resize", redraw);
+
+</script>
