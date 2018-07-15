@@ -2,8 +2,8 @@ import os
 import sys
 import json
 import datetime
-
-first_arg = sys.argv[1]
+import getopt
+from collections import defaultdict
 
 
 class AlembicRevisionNetworkCreator(object):
@@ -43,22 +43,101 @@ class AlembicRevisionNetworkCreator(object):
                             'source': down_revision,
                             'target': revision
                         })
-
         return links
 
+    @staticmethod
+    def get_end_nodes(links):
 
-if __name__ == "__main__":
-    if not first_arg:
-        print("Please provide a path to analyze!")
-        quit()
+        target_usage_count = defaultdict(int)
+        target_usage_count['none'] += 1  # Increase 'none' node count so it doesn't show.
+        for source_target_dict in links:
+            target_usage_count[source_target_dict['target']] += 1
+            target_usage_count[source_target_dict['source']] += 1
+        return [target for target, count in target_usage_count.items() if count == 1]
 
-    graph_data_creator = AlembicRevisionNetworkCreator(first_arg)
-    links = json.dumps(graph_data_creator.get_links())
+    @staticmethod
+    def get_target_sources_dict(links):
+
+        target_sources = defaultdict(list)
+        for source_target_dict in links:
+            target_sources[source_target_dict['target']].append(source_target_dict['source'])
+        return target_sources
+
+    @staticmethod
+    def get_target_sources(target_sources_dict, end_node):
+        sources = []
+        for target, inner_sources in target_sources_dict.items():
+            if target == end_node:
+                sources += inner_sources
+        return sources
+
+    def get_pruned_tree_sources(self, links, max_tree_depth):
+
+        end_nodes = self.get_end_nodes(links)
+        target_sources_dict = self.get_target_sources_dict(links)
+        source_list = self.get_pruned_source_list(end_nodes, target_sources_dict, max_tree_depth)
+        return set(source_list)
+
+    def get_pruned_source_list(self, targets, target_sources_dict, depth_running_total):
+
+        target_sources = []
+        if depth_running_total > 0:
+            target_sources += targets
+            for target in targets:
+                sources_sources = self.get_target_sources(target_sources_dict, target)
+                if sources_sources:
+                    target_sources += self.get_pruned_source_list(
+                        sources_sources,
+                        target_sources_dict,
+                        depth_running_total - 1
+                    )
+        return target_sources
+
+    def pruned_get_links(self, max_tree_depth):
+        links = self.get_links()
+        pruned_tree_sources = self.get_pruned_tree_sources(links, max_tree_depth)
+        return [link for link in links if link['source'] in pruned_tree_sources]
+
+
+def main(argv):
+    versions_directory = ''
+    max_tree_depth = None
+    try:
+        opts, args = getopt.getopt(argv, "hv:d:", ["help=", "versions_directory=", "max_tree_depth="])
+    except getopt.GetoptError:
+        print('alembic_revision_plotting.py -v <versions_directory> [-d <max_tree_depth>]')
+        sys.exit(2)
+
+    if len(opts) == 0:
+        print('alembic_revision_plotting.py -v <versions_directory> [-d <max_tree_depth>]')
+        sys.exit(2)
+
+    for opt, arg in opts:
+
+        if opt in ("-h", "--help"):
+            print('alembic_revision_plotting.py -v <versions_directory> [-d <max_tree_depth>]')
+            sys.exit()
+        elif opt in ("-v", "--versions_directory"):
+            versions_directory = arg
+        elif opt in ("-d", "--max_tree_depth"):
+            try:
+                max_tree_depth = float(arg)
+            except ValueError:
+                print("Max tree depth provide is not a number!")
+
+    graph_data_creator = AlembicRevisionNetworkCreator(versions_directory)
+    link_list_dict = json.dumps(
+        graph_data_creator.pruned_get_links(max_tree_depth) if max_tree_depth else graph_data_creator.get_links()
+    )
 
     with open('force-graph-template.html') as f:
         force_graph_html_template = f.read()
-        force_graph_html_template = force_graph_html_template.replace("'<insert_links_here>'", links)
+        force_graph_html_template = force_graph_html_template.replace("'<insert_links_here>'", link_list_dict)
 
     new_filename = 'force-graph-template-{}.html'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
     with open(new_filename, "w") as f:
         f.write(force_graph_html_template)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
