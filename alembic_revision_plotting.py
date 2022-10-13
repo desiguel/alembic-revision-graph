@@ -4,14 +4,28 @@ import json
 import datetime
 import getopt
 from collections import defaultdict
+from dataclasses import dataclass
+
+
+@dataclass
+class AlembicRevisionMetaData:
+    revision: str
+    down_revisions: List[str]
+    author: str
+
+
+@dataclass
+class NetworkLink:
+    from_revision: AlembicRevisionMetaData
+    to_revision: AlembicRevisionMetaData
 
 
 class AlembicRevisionNetworkCreator(object):
 
-    def __init__(self, versions_path):
+    def __init__(self, versions_path: str):
         self.versions_path = versions_path
 
-    def _get_version_and_down_revisions(self, filename):
+    def _get_alembic_metadata_from_revision_file(self, filename: str) -> AlembicRevisionMetaData:
 
         with open(os.path.join(self.versions_path, filename)) as f:
             file_text = f.read()
@@ -28,31 +42,34 @@ class AlembicRevisionNetworkCreator(object):
             else:
                 revision = line.split("revision = ", 1)[1]
 
-        return revision, down_revisions
+        # Get file author. Assume that this is the person who made the most commits.
+        author = "todo"
 
-    def get_links(self):
+        return AlembicRevisionMetaData(revision, down_revisions, author)
+
+    def get_links(self) -> List[NetworkLink]:
 
         links = []
         for filename in os.listdir(self.versions_path):
             if filename.endswith(".asm") or filename.endswith(".py"):
 
-                revision, down_revisions = self._get_version_and_down_revisions(filename)
-                for down_revision in down_revisions:
+                alembic_revision_metadata = self._get_alembic_metadata_from_revision_file(filename)
+                for down_revision in alembic_revision_metadata.down_revisions:
                     if down_revision:
-                        links.append({
-                            'source': down_revision,
-                            'target': revision
-                        })
+                        links.append(NetworkLink(down_revision, revision))
         return links
 
     @staticmethod
-    def get_end_nodes(links):
+    def get_end_nodes(links: List[NetworkLink]) -> List[str]:
 
         target_usage_count = defaultdict(int)
         target_usage_count['none'] += 1  # Increase 'none' node count so it doesn't show.
-        for source_target_dict in links:
-            target_usage_count[source_target_dict['target']] += 1
-            target_usage_count[source_target_dict['source']] += 1
+
+        for network_link in links:
+            target_usage_count[network_link.to_revision] += 1
+            target_usage_count[network_link.from_revision] += 1
+
+        # End nodes will only have one entry in the list of network links. Take advantage of this to identify them.
         return [target for target, count in target_usage_count.items() if count == 1]
 
     @staticmethod
